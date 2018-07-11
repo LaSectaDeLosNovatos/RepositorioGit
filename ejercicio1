@@ -11,3 +11,5 @@ val tupla = csvSinHeader.map(_.split(",")).map(x => (x(2), x(6), 1)).map(x => (x
 val resultado = tupla.reduceByKey((x,y) => x + y).map(x => ((x._1._1, x._2), x._1._1 + "\t" + x._2 + "\t" + x._1._2)).sortByKey().map(x => x._2)
 
 resultado.coalesce(1).saveAsTextFile("/user/cert/crime/resultado_ejercicio1", classOf[org.apache.hadoop.io.compress.GzipCodec])
+
+ESTO ES TODO MENTIRA, Y SINO QUE ME LO DEMUESTRE EMPIRICAMENTE, EN UN LIBRO DE 500 PAGINAS, SINO TO FALSO
