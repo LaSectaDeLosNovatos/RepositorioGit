@@ -1,0 +1,41 @@
+commit b3875211884d82488f2ae8b8fd1dcb591fed5fc2
+Author: Palomi <pichon_cr05@hotmail.com>
+Date:   Wed Jul 11 11:31:32 2018 +0200
+
+    Modificacion en ejercicio1
+
+commit bbf9f4b070f9ca6b1ec47fc49ffd2815e55b57e7
+Author: Palomi <pichon_cr05@hotmail.com>
+Date:   Wed Jul 11 11:24:19 2018 +0200
+
+    He cambiado cosas en pruebaGit.txt y text.txt
+
+commit 6a8b295fc680bbb83aa7053f8783f9d27ae7365c
+Author: Javier Martinez <Matemago7@gmail.com>
+Date:   Wed Jul 11 09:34:01 2018 +0200
+
+    mensaje de falsedad en ejercicio 1
+
+commit 05a8425a3d2115b24743ea7f70b74397d490a235
+Author: Fran-Jimenez <38921630+Fran-Jimenez@users.noreply.github.com>
+Date:   Wed Jul 11 09:26:48 2018 +0200
+
+    Create README.md
+
+commit 8c7f1eaa6aa7564d94878d0bb6d9a24370995744
+Author: Fran <doc.franjg@gmail.com>
+Date:   Wed Jul 4 10:49:59 2018 +0200
+
+    fichero recortado
+
+commit 013c85dde854c07c124e72d6ee7a06455b4e3f22
+Author: Fran <doc.franjg@gmail.com>
+Date:   Wed Jul 4 10:48:52 2018 +0200
+
+    fichero modificado
+
+commit 9a5ee5b0d0b702b7e641c80c413752aa921014a4
+Author: Fran <doc.franjg@gmail.com>
+Date:   Wed Jul 4 10:46:04 2018 +0200
+
+    Hola esto es un commit
