@@ -1,0 +1,139 @@
+//simulacro 4
+
+// 1. GUARDAR DE crimes.csv LAS COLUMNAS NECESARIAS PARA SACAR LA LOCALIZACION APARTMENT, Y LA DESCRIPCION DOMESTIC BATTERY SIMPLE.
+FORMATO AVRO + SNAPPY
+
+spark-shell
+val lectura = sc.textFile("/user/cert/crimes/crimes.csv")
+val cabecera = lectura.first
+val cuerpo = lectura.filter( x => x != cabecera).map(_.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1)).map( x => (x(7), x(6)))
+
+val filtro = cuerpo.filter( x => x._1 = "APARTMENT").filter(x => x._2 = "DOMESTIC BATTERY SIMPLE")
+
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
+
+val str = StructType(Array(
+  StructField("LOCATION", StringType),
+  StructField("DESCRIPTION", StringType)
+  ))
+val campo = filtro.map(x => Row(x._1, x._2))
+
+val myDF = sqlContext.createDataFrame(campo, str)
+
+import com.databricks.spark.avro._
+
+sqlContext.setConf("spark.sql.avro.compression.codec", "snappy")
+
+myDF.write.avro("/user/cert/simulacro4/ej1")
+
+
+// 2. ENCONTRAR EL TOP 10 DE CRIMENES EN 2001 CON LOCALIZACION STREET. CSV
+
+val lectura = sc.textFile("/user/cert/crimes/crimes.csv")
+val cabecera = lectura.first
+val crimenes = lectura.filter( x => x != cabecera).map(_.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1)).filter(x => x(7) == "STREET").filter(x => x(17).toInt == 2001).map(x => (x(5),1))
+
+val resultado = crimenes.reduceByKey((x,y) => x+y ).map(x => (x._2,x._1)).sortByKey(ascending = false).map( x => (x._2, x._1)).map(x => x._1 + "," + x._2.toString)
+
+resultado.saveAsTextFile("/user/cert/simulacro4/ej2", classOf[org.apache.hadoop.io.compress.GzipCodec])
+
+//FALTA EL TOP 10, SERIA METERLO EN DF, Y HACERLE UN LIMIT 10, LUEGO PASAR A RDD Y GUARDARLO
+
+// 3. TOP 20 DE PAISES CON MAS MEDALLAS EN NATACION. PARQUET + SNAPPY
+
+val lectura = sc.textFile("/user/cloudear/data/olympic/").map(_.split(','))
+val country_medals = lectura.filter(x => x(5) == "Swimming").map(x => (x(2), x(9).toInt)).reduceByKey((x,y) => x+y).map(x => (x._2,x._1)).sortByKey(ascending = false).map(x => (x._2,x._1))
+
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
+
+val st = StructType(Array(
+  StructField("country", StringType),
+  StructField("medals", IntegerType)
+  ))
+val reg = country_medals.map(x => Row(x._1,x._2))
+
+val myDF = sqlContext.createDataFrame(reg, st)
+
+sqlContext.setConf("spark.sql.parquet.compression.codec", "snappy")
+
+myDF.limit(20).repartition(1).write.parquet("/user/cert/simulacro4/ej3")
+
+// 4. HACER LA MEDIA DE ASESINATOS(HOMICIDE) CUYA LOCALIZACION EMPIECCE CON R, GUARDAR EN JSON + GZIP. OP: AGRUPAR POR AÑOS
+
+val lectura = sc.textFile("/user/cert/crimes/crimes.csv")
+val cabecera = lectura.first
+val crimenes = lectura.filter( x => x != cabecera).map(_.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1)).filter(x => x(7).startsWith("R")).filter(x => x(5) == "HOMICIDE")
+
+val annyo = crimenes.map (x => (x(17),1)).reduceByKey(_+_).map(x =>(1,(x._2,1))).reduceByKey((x,y)=> (x._1+y._1,x._2+y._2)).map(x => x._2._1.toFloat / x._2._2)
+
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
+
+val mierdatabla = StructType(Array(
+  StructField("media_asesinatos", FloatType)
+  ))
+val meierRow = annyo.map(x => Row(x))
+
+val resultado = sqlContext.createDataFrame(meierRow, mierdatabla)
+
+resultado.repartition(1).toJSON.saveAsTextFile("/user/cert/simulacro4/ej4", classOf[org.apache.hadoop.io.compress.GzipCodec])
+
+
+// 5. SACAR EL PRODUCTO MAS VENDIDO. GUARDAR EN CSV + GZIP
+
+import com.databricks.spark.avro._
+
+val oItDF = sqlContext.read.avro("/user/cert/simulacro3/data/order_items")
+val prodDF = sqlContext.read.avro("/user/cert/simulacro3/data/products")
+
+val agrupado = oItDF.groupBy("order_item_product_id").agg(sum("order_item_quantity").as("total_products_sold"))
+
+val joined = prodDF.join(agrupado, prodDF("product_id")===agrupado("order_item_product_id"))
+
+val solucion = joined.select("product_name", "total_products_sold", "product_price").orderBy($"total_products_sold".desc).limit(1)
+
+solucion.repartition(1).rdd.map(x => x(0).toString + "," + x(1).toString + "," + x(2)).saveAsTextFile("/user/cert/simulacro4/ej5b", classOf[org.apache.hadoop.io.compress.GzipCodec])
+
+
+// 6. PASAR DE HDFS A MYSQL LOS DEPARTAMENTOS CON MAS CATEGORIAS Y MOSTRAR 3
+
+import com.databricks.spark.avro._
+
+val cat = sqlContext.read.avro("/user/cert/simulacro3/data/categories")
+
+val agrupado = cat.groupBy("category_department_id").agg(countDistinct("category_id").as("total_categories")).orderBy($"total_categories".desc)
+
+val myRDD = agrupado.rdd.map(x => x(0) + "," + x(1))
+
+myRDD.saveAsTextFile("/user/cert/simulacro4/ej6")
+
+
+mysql -u cloudera -pcloudera
+
+use ejercicios;
+
+create table departamentos(
+  department_id varchar(45),
+  total_categories int);
+
+
+sqoop export \
+--connect jdbc:mysql://localhost:3306/ejercicios \
+--username cloudera --password cloudera \
+--table departamentos \
+--export-dir /user/cert/simulacro4/ej6 \
+--fields-terminated-by ','
+
+// 7. CREAR UNA TABLA CON LOS PRODUCTOS MAS CAROS DE CADA DEPARTAMENTO. AÑADIR EL NUMERO DE ORDERS QUE HAN TENIDO DICHOS PRODUCTOS
+
+val prod = sqlContext.read.avro("/user/cert/simulacro3/data/products")
+val cat = sqlContext.read.avro("/user/cert/simulacro3/data/categories")
+val oIt = sqlContext.read.avro("/user/cert/simulacro3/data/order_items")
+
+val join1 = prod.join(cat, prod("product_category_id")===cat("category_id"))
+
+val join2 = join1.join(oIt, join1("product_id")===oIt("order_item_product_id"))
+
+join2.groupBy("category_department_id").agg(max("product_price").as("maximum_price"), sum("order_quantity").as("total_orders")).orderBy($"maximum_price".desc)
