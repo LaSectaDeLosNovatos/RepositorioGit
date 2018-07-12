@@ -1,0 +1,158 @@
+//simulacro 3
+
+// 1. IMPORTAR TODAS LAS TABLAS DE RETAIL_DB DE MYSQL EN FORMATO AVRO+SNAPPY. DELIMITADOR "|"
+
+sqoop import-all-tables --connect jdbc:mysql://localhost:3306/retail_db --username cloudera --password cloudera --warehouse-dir /user/cert/simulacro3/data --as-avrodatafile --fields-terminated-by '|' --compress --compression-codec org.apache.hadoop.io.compress.SnappyCodec -m 1
+
+// 2. EXPORTAR CON SQOOP A MYSQL A LA TABLA productos_baratos, LOS CAMPOS product_name, product_price DE LA TABLA PRODUCTS, DONDE EL PRECIO SEA INFERIOR A 50, O QUE EL product_name COMIENCE CON "A".
+
+import com.databricks.spark.avro._
+
+val myDF = sqlContext.read.avro("/user/cert/simulacro3/data/products") 
+
+myDF.registerTempTable("productos")
+
+val filtros = sqlContext.sql("select product_name, product_price from productos where product_price < 50 or product_name like 'a%' ")
+
+val sol = filtros.rdd.map(x => x(0) + "," + x(1) )
+sol.saveAsTextFile("/user/cert/simulacro3/soluciones/ej2")
+
+mysql -u cloudera -pcloudera
+
+use retail_db;
+create table productos_baratos(
+	product_name varchar(255),
+	product_price float
+	)
+
+sqoop export --connect jdbc:mysql://localhost:3306/retail_db --username cloudera --password cloudera --table productos_baratos --export-dir /user/cert/simulacro3/soluciones/ej2 --fields-terminated-by ','
+
+// 3. CREAR EN HIVE UNA TABLA CON LOS MISMOS CAMPOS QUE 2, PERO CON  PRECIO MAYOR A 100. HACER TRAS ESTO UNA QUERY QUE NOS DEVUELVA EL NUMERO DE PRODUCTOS CON EL MISMO PRECIO. GUARDAR LA SALIDA EN UN DIRECTORIO DE HDFS CON LOS CAMPOS SEPARADOS POR TABS
+
+import com.databricks.spark.avro._
+
+val myDF = sqlContext.read.avro("/user/cert/simulacro3/data/products")
+
+val myRDD = myDF.rdd.map(x => (x(2).toString, x(4).toString.toFloat)).filter(x => x._2 > 100)
+
+myRDD.map(x => x._1 + "," + x._2).saveAsTextFile("/user/cert/simulacro3/soluciones/ej3")
+
+hive
+
+use problem3;
+create external table productos_caros(
+product_name string,
+product_price float
+)
+row format delimited
+fields terminated by ','
+stored as textfile
+location '/user/cert/simulacro3/soluciones/ej3'
+
+insert overwrite directory '/user/cert/simulacro3/soluciones/ej3/dir' row format delimited fields terminated by '\t' stored as textfile select product_price, count(*) from productos_caros group by product_price
+
+
+// 4. LEER CUSTOMERS, REALIZAR UN FILTRO PARA CONSEGUIR QUE EL CODIGO POSTAL SEA 00725. GUARDAR EN PARQUET + GZIP
+
+import com.databricks.spark.avro._
+
+val cust = sqlContext.read.avro("/user/cert/simulacro3/data/customers")
+
+val solucion = cust.where("customer_zipcode = '00725'")
+
+sqlContext.setConf("spark.sql.parquet.compression.codec", "gzip")
+
+solucion.write.parquet("/user/cert/simulacro3/soluciones/ej4")
+
+
+// 5. CONSEGUIR EL PRECIO MEDIO DE LOS PRODUCTOS POR CATEGORIA. EL OUTPUT DEBE APARECER NOMBRE DE CATEGORIA Y PRECIO MEDIO EN UNA SOLA COLUMNA, SEPARADOS POR ", ". GUARDAR EN PARQUET SIN COMPRESION
+
+import com.databricks.spark.avro._
+
+val cat = sqlContext.read.avro("/user/cert/simulacro3/data/categories")
+val prod = sqlContext.read.avro("/user/cert/simulacro3/data/products")
+val joined = cat.join(prod, cat("category_id")===prod("product_category_id"))
+
+val media_precio = joined.groupBy("category_name").agg(round(avg("product_price"),2).as("media_price"))
+
+val solution = media_precio.rdd.map(x => x(0) + "," + x(1))
+
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
+
+val st = StructType(Array(
+  StructField("product_prices", StringType)
+  ))
+val reg = solution.map(x => Row(x))
+
+val ultimo = sqlContext.createDataFrame(reg, st)
+
+sqlContext.setConf("spark.sql.parquet.compression.codec", "uncompressed")
+
+ultimo.write.parquet("/user/cert/simulacro3/soluciones/ej5")
+
+
+// 6. CON EL FICHERO olympicAthletes.csv CONSEGUIR EL TOP 5 DE ATLETAS CON MAS MEDALLAS DE ORO, REALIZAR EL EJERCICIO CON RDD. GUARDAR EN JSON + SNAPPY
+
+val lectura = sc.textFile("/user/cert/simulacro3/data/OlympicAthletes.csv").map(_.split(','))
+
+val campos = lectura.map(x => (x(0), x(6).toInt))
+
+val solucion = campos.reduceByKey( (x,y) => x+y).map( x => (x._2, x._1)).sortByKey(ascending = false).map(x => (x._2,x._1))
+
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
+
+val stru = StructType(Array(
+  StructField("medallista", StringType),
+  StructField("medallas", IntegerType)
+  ))
+
+val campos = solucion.map(x => Row(x._1.toString, x._2.toInt))
+
+val myDf = sqlContext.createDataFrame(campos, stru)
+
+myDf.limit(5).repartition(1).toJSON.saveAsTextFile("/user/cert/simulacro3/soluciones/ej6")
+
+
+// 7. SACAR LOS 5 customer_id CON MAS ORDENES
+
+import com.databricks.spark.avro._
+
+val cust = sqlContext.read.avro("/user/cert/simulacro3/data/customers")
+val ord = sqlContext.read.avro("/user/cert/simulacro3/data/orders")
+val joined = cust.join(ord, cust("customer_id")===ord("order_customer_id"))
+
+val sol = joined.groupBy("customer_id").agg(countDistinct("order_id").as("total_orders")).orderBy($"total_orders".desc).limit(5)
+
+sol.write.avro("/user/cert/simulacro3/soluciones/ej7")
+
+
+// 8. DEL FICHERO crimes.csv, BUSCAR ENCONTRAR TODOS LOS CRIMENES REALIZADOS EN (LOCATION DESCRIPTION) "BAR OR TAVERN", Y QUE EL CRIMEN SEA DEL TIPO "CRIMINAL DAMAGE"
+
+val lectura = sc.textFile("/user/cert/simulacro3/data/crimes")
+val cabecera = lectura.first
+val cuerpo = lectura.filter(x => x != cabecera).map(_.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1))
+
+val filtro = cuerpo.filter( x => x(5) == "CRIMINAL DAMAGE").filter(x => x(7) == "BAR OR TAVERN")
+
+filtro.saveAsTextFile("/user/cert/simulacro3/soluciones/ej8", classOf[org.apache.hadoop.io.compress.GzipCodec])
+
+
+// 9. SACAR EL PRECIO MEDIO POR DEPARTAMENTO. ORDENAR POR PRECIO. OPCIONAL: HACERLO EN RDD
+
+import com.databricks.spark.avro._
+
+val dep = sqlContext.read.avro("/user/cert/simulacro3/data/departments")
+val cat = sqlContext.read.avro("/user/cert/simulacro3/data/categories")
+val prod = sqlContext.read.avro("/user/cert/simulacro3/data/products")
+
+val prodcat = prod.join(cat, prod("product_category_id")===cat("category_id"))
+
+val macrojoin = prodcat.join(dep, prodcat("category_department_id")===dep("department_id"))
+
+
+val solu = macrojoin.groupBy("category_department_id").agg(round(avg("product_price"),2).as("media_precio")).orderBy($"media_precio".desc)
+
+sqlContext.setConf("spark.sql.parquet.compression.codec", "snappy")
+solu.write.parquet("/user/cert/simulacro3/soluciones/ej9")
