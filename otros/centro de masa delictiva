@@ -1,0 +1,19 @@
+//LA INTENCION ES ENCONTRAR EL CENTRO DE MASAS DE CADA TIPO DE DELITO, ADEMAS DEL TOTAL DE DELITOS DE CADA TIPO USANDO SOLO RDD. GUARDAR LOS DATOS EN CSV + GZIP
+
+val myRDD = sc.textFile("/user/cert/crimes/crimes.csv")
+
+val cabecera = myRDD.first
+
+val cuerpo = myRDD.filter(x => x != cabecera).map(x => x.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1))
+
+val camposutiles = cuerpo.map( x => (x(5), (x(15),x(16),1))).filter(x => x._2._1 != "")
+
+val casteo = camposutiles.map(x => (x._1,(x._2._1.toInt, x._2._2.toInt, x._2._3)))
+
+val recuento = casteo.reduceByKey((x,y) => (x._1+y._1,x._2+y._2,x._3+y._3))
+
+val solution = recuento.map (x => (x._1, x._2._1.toFloat/x._2._3, x._2._2.toFloat/x._2._3, x._2._3))
+
+val solutioncsv = solution.map (x => x._1 + "," + x._2.toString + "," + x._3.toString + "," + x._4.toString)
+
+solutioncsv.repartition(4).saveAsTextFile("/user/cert/Javi/centro_masa", classOf[org.apache.hadoop.io.compress.GzipCodec])

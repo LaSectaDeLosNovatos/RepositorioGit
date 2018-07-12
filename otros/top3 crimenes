@@ -1,0 +1,37 @@
+//VAMOS A HACER UNA PREVISUALIZACION DEL ARCHIVO
+hdfs dfs -cat /user/cert/crimes/crimes.csv | head -n 5
+
+//TIENE CABECERA, HABRA QUE QUITARSELA DESDE SCALA
+val myRDD = sc.textFile("/user/cert/crimes/crimes.csv")
+
+val cabecera = myRDD.first
+
+val cuerpo = myRDD.filter(x => x != cabecera)
+
+//VAMOS A MAPEAR EL RDD, CON LA FORMULA QUE NOS DAN EN EL EJERCICIO split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1)
+
+val cosas = cuerpo.map(_.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1))
+
+val camposutiles = cosas.map(x => (x(0),x(7), x(5))
+
+//TRAS ESTE MAPEO CON UN SPLIT HORRIBLE, VAMOS A METER LOS CAMPOS UTILES EN UN DATAFRAME, PARA ELLO, PRIMERO LE CREAREMOS LA ESTRUCTURA
+
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
+
+val crimeschema = StructType(Array(
+  StructField("crimeID", IntegerType),
+  StructField("Location_description", StringType),
+  StructField("Primary_Type", StringType)
+  ))
+
+val crimeline = camposutiles.map(x => Row(x._1.toInt, x._2.toString, x._3.toString))
+
+val crimeDF = sqlContext.createDataFrame(crimeline, crimeschema)
+
+
+val filterDF = crimeDF.filter($"Location_description"==="RESIDENCE")
+
+val solution = filterDF.groupBy("Primary_Type").agg(count("crimeID").as("top3")).orderBy($"top3".desc).limit(3)
+
+solution.show(3)

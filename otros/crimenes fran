@@ -1,0 +1,158 @@
+// CONSEGUIR EL TOP 5 DE AÑOS CON MAS DELITOS EN LA CALLE ENTRE 2001 Y 2008
+//A) CON RDD. GUARDARLO EN CSV + GZIP
+//B) CON SPARK-SQL. GUARDAR EN PARQUET + SNAPPY
+//C) CON DATAFRAMES. GUARDAR EN AVRO + SNAPPY
+//D) CREAR LAS TABLAS resultados-csv, resultados-parquet, resultados-avro EN HIVE, EN LA BASE DE DATOS FBI(CREARLA)
+
+//PRIMERO VAMOS A LEER EL ARCHIVO CON UN RDD
+val myRDD = sc.textFile("/user/cert/crimes/crimes.csv")
+myRDD.take(2) 					
+
+//SALE LA CABECERA, HAY QUE QUITARLA
+
+val cabecera = myRDD.first
+
+val crimesRDD = myRDD.filter(x => x != cabecera)
+
+crimesRDD.take(2) 				
+
+//VAMOS A REALIZARLE EL SPLIT PARA PODER TRABAJAR CON CAMPOS EN VEZ DEL RDD ENTERO
+
+val crimesplitted = crimesRDD.map(_.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1))
+
+//NOS INTERESA QUE SEAN EN LA CALLE, Y ENTRE LOS AÑOS 2001 Y 2008, VAMOS A FILTRAR PRIMERO POR CALLE(INDICE 7 DE CAMPO), LUEGO POR AÑOS (INDICE 17 DE CAMPO)
+
+val filterRDD = crimesplitted.filter(x => x(7) == "STREET").filter(x => x(17).toInt >= 2001).filter(x => x(17).toInt <= 2008)
+
+filterRDD.take(2)
+
+//AHORA VAMOS A QUEDARNOS CON LOS CAMPOS QUE NOS INTERESEN, PARA NO TENER RDD TAN GRANDES
+
+val usefulfieldsRDD = filterRDD.map(x => (x(17).toInt, x(7).toString))
+
+//VAMOS A REALIZAR UNA OPERACION DE PAIR-RDD PARA CONTAR DONDE SE REPITE NUESTRA CLAVE QUE SERA REALMENTE TODO EL RDD, POR TANTO NECESITAREMOS AÑADIRLE UN 1 A ESTA CLAVE COMO VALOR, Y DESPUES HAREMOS UN RECUENTO
+
+val pairRDD = usefulfieldsRDD.map(x => ((x._1,x._2),1))
+
+val recount = pairRDD.reduceByKey((x,y) => x + y )
+
+//QUEREMOS EL TOP 5, POR TANTO TENEMOS QUE ORDENARLOS POR LO QUE AHORA ES EL VALOR, SI CAMBIAMOS EL ORDEN DE (KEY,VALUE) POR (VALUE,KEY) Y NOS HACEMOS UN SORTBYKEY, PODREMOS OBTENER EL TOP POR CRIMENES, LUEGO LO REORDENAMOS
+
+val reorden = recount.map(x => (x._2,x._1)).sortByKey(ascending=false).map(x => (x._2,x._1))
+
+reorden.take(5)
+
+//PROCEDEMOS A GUARDARLO EN CSV CON GZIP (SOLO CON EL AÑO, LO DE STREET NO ME INTERESA)
+
+val resultadoRDD = reorden.map(x => x._1._1 + "," + x._2)
+
+resultadoRDD.take(5)
+
+resultadoRDD.saveAsTextFile("/user/cert/Fran/resultRDD", classOf[org.apache.hadoop.io.compress.GzipCodec])
+
+
+----------------------------********************------------------------
+
+//VAMOS A POR EL DE DATAFRAMES, PARTIMOS DESDE EL crimesplitted, VAMOS A DARLE ESTRUCTURA, SOLO PARA LOS CAMPOS QUE NOS INTERESAN, QUE SERAN LOS QUE USEMOS EN EL ROW
+
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.Row
+
+val myStructure = StructType(Array(
+  StructField("Año", IntegerType),
+  StructField("Localizacion", StringType)
+  ))
+
+val registros = crimesplitted.map(x => Row(x(17).toInt, x(7)))
+
+val myDF = sqlContext.createDataFrame(registros, myStructure)
+
+myDF.show(4)
+
+//REALIZAMOS EL FILTRADO POR LOCALIZACION Y AÑO
+
+val filter1DF = myDF.where($"Localizacion"==="STREET").where($"Año" >= 2001 and $"Año" <= 2008)
+
+filter1DF.show(5)
+
+//A POR LA SOLUCION
+
+val solucionDF = filter1DF.groupBy("Año").agg(count("Localizacion").as("Delitos")).orderBy($"Delitos".desc)
+
+solucionDF.show(5)
+
+//PROCEDEMOS A GUARDARLO EN AVRO
+
+import com.databricks.spark.avro._
+
+sqlContext.setConf("spark.sql.avro.compression.codec", "snappy")
+
+solucionDF.write.avro("/user/cert/Fran/resultDF")
+
+
+
+------------------------*******************---------------------
+
+
+//A POR EL SPARK-SQL, VAMOS A REHACER EL ESQUEMA PORQUE SQL NO RECONOCE LA Ñ DE AÑO
+
+val myStructure2 = StructType(Array(
+  StructField("Anyo", IntegerType),
+  StructField("Localizacion", StringType)
+  ))
+
+  val registros2 = crimesplitted.map(x => Row(x(17).toInt, x(7)))
+
+  val myDF2 = sqlContext.createDataFrame(registros2, myStructure2)
+
+myDF2.registerTempTable("crimenes")
+
+val resultSQL = sqlContext.sql("select Anyo, count(Localizacion) as delitos from crimenes where Localizacion = 'STREET' and Anyo between 2001 and 2008 group by Anyo order by count(Localizacion) desc")
+
+//VAMOS A MODIFICAR EL CONF PARA GUARDARLO EN PARQUET + SNAPPY
+
+sqlContext.setConf("spark.sql.parquet.compression.codec", "snappy")
+
+resultSQL.write.parquet("/user/cert/Fran/resultSQL")
+
+------------------*******************------------------------
+
+//A CREAR TABLAS EN HIVE, PRIMERO CREAREMOS LA BASE DE DATOS FBI
+
+create database FBI;
+
+use FBI;
+
+//VAMOS A CREAR PRIMERO LA TABLA DEL CSV
+
+create external table if not exists resultado_csv (
+    anyo int, 
+    delitos int)
+    row format delimited
+    fields terminated by ','
+    location '/user/cert/Fran/resultRDD'
+    ;
+
+//A POR LA DEL AVRO, NOS TRAEREMOS UN ARCHIVO A LOCAL PARA SACARLE EL ESQUEMA
+
+ hdfs dfs -get /user/cert/Fran/resultDF/part-r-00000-8720960e-02f2-4bc4-bd98-f57e2df9da32.avro /home/cloudera/Desktop
+
+ avro-tools getschema /home/cloudera/Desktop/part-t-00000-8720960e-02f2-4bc4-bd98-f57e2df9da32.avro > nuevosc.avsc
+
+hdfs dfs -mkdir /user/cert/Fran/esquema_avro
+
+hdfs dfs -put /home/cloudera/nuevosc.avsc /user/cert/Fran/esquema_avro
+
+create external table result_avro
+stored as avro
+location '/user/cert/Fran/resultDF'
+tblproperties ('avro.schema.url'='/user/cert/Fran/esquema_avro/nuevosc.avsc');
+
+
+//A POR LA DE PARQUET
+
+create external table resultado_parquet (
+Anyo int,
+delitos bigint)
+stored as parquet
+location '/user/cert/Fran/resultSQL'
