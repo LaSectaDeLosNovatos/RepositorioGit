@@ -1,6 +1,8 @@
 # RepositorioGit
 Chavules os dejo por aquí un articulo que viene de ptm para enterarse que es eso de Docker XD sensillo y para toda la familia: http://www.javiergarzas.com/2015/07/que-es-docker-sencillo.html
 
+PlayList con videos sobre Docker para ir viendolos!: https://www.youtube.com/watch?v=1LRzlUoyZg4&list=PLn5IkU1ZhgiZl4EH7AFkqs-pqF6ZUz_iS
+
 
 Primero que nada teneis que bajaros Git para windows de este enlace: https://git-scm.com/download/win
 
